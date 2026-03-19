@@ -258,20 +258,24 @@ describe('getRecentUnassignments', () => {
   test('searches across multiple repos', async () => {
     const core = mockCore();
     const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    let callCount = 0;
 
     const github = {
       rest: {
         search: {
-          issuesAndPullRequests: jest.fn().mockResolvedValue({
-            data: {
-              items: [
-                {
-                  number: 1,
-                  html_url: 'https://github.com/org/repoX/issues/1',
-                  title: 'Issue in repoX',
-                },
-              ],
-            },
+          issuesAndPullRequests: jest.fn().mockImplementation(() => {
+            callCount++;
+            return Promise.resolve({
+              data: {
+                items: [
+                  {
+                    number: callCount,
+                    html_url: `https://github.com/org/repo${callCount}/issues/${callCount}`,
+                    title: `Issue in repo${callCount}`,
+                  },
+                ],
+              },
+            });
           }),
         },
         issues: {
@@ -297,7 +301,52 @@ describe('getRecentUnassignments', () => {
     );
 
     expect(github.rest.search.issuesAndPullRequests).toHaveBeenCalledTimes(2);
-    // Both repos return results
+    // Both repos return distinct results
     expect(result).toHaveLength(2);
+  });
+
+  test('deduplicates multiple unassignment events for the same issue', async () => {
+    const core = mockCore();
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    const oneDayAgo = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+
+    const github = {
+      rest: {
+        search: {
+          issuesAndPullRequests: jest.fn().mockResolvedValue({
+            data: {
+              items: [
+                {
+                  number: 10,
+                  html_url: 'https://github.com/org/repo1/issues/10',
+                  title: 'Reassigned issue',
+                },
+              ],
+            },
+          }),
+        },
+        issues: {
+          listEventsForTimeline: jest.fn(),
+        },
+      },
+      paginate: jest.fn().mockResolvedValue([
+        {
+          event: 'unassigned',
+          assignee: { login: 'testuser' },
+          created_at: twoDaysAgo,
+        },
+        {
+          event: 'unassigned',
+          assignee: { login: 'testuser' },
+          created_at: oneDayAgo,
+        },
+      ]),
+    };
+
+    const result = await getRecentUnassignments('testuser', 7, 'org', ['repo1'], github, core);
+
+    // Should deduplicate to 1 entry, keeping the most recent
+    expect(result).toHaveLength(1);
+    expect(result[0].unassignedAt).toBe(oneDayAgo);
   });
 });

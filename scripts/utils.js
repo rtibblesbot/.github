@@ -313,7 +313,17 @@ async function getRecentUnassignments(username, daysAgo, owner, repos, github, c
     }
   }
 
-  return unassignments;
+  // Deduplicate by issueUrl, keeping the most recent unassignment event.
+  // A user could be assigned/unassigned multiple times on the same issue
+  // within the cooldown window, and each event should only count once.
+  const byIssue = new Map();
+  for (const u of unassignments) {
+    const existing = byIssue.get(u.issueUrl);
+    if (!existing || new Date(u.unassignedAt) > new Date(existing.unassignedAt)) {
+      byIssue.set(u.issueUrl, u);
+    }
+  }
+  return [...byIssue.values()];
 }
 
 module.exports = {
