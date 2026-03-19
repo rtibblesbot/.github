@@ -267,3 +267,57 @@ describe('/assign command handling', () => {
     expect(core._outputs).not.toHaveProperty('support_dev_message');
   });
 });
+
+describe('keyword detection on GFI issues', () => {
+  let script;
+
+  beforeEach(() => {
+    jest.resetModules();
+    script = require('./contributor-issue-comment');
+  });
+
+  test('keyword on unassigned GFI replies with BOT_MESSAGE_KEYWORD_GOOD_FIRST_ISSUE', async () => {
+    const core = mockCore();
+    const context = makeContext({
+      commentBody: 'Can I work on this issue?',
+      commentAuthor: 'newcontrib',
+      issueCreator: 'creator',
+    });
+    const github = makeGithub({
+      labels: ['help wanted', 'good first issue'],
+    });
+
+    await script({ github, context, core });
+
+    const { BOT_MESSAGE_KEYWORD_GOOD_FIRST_ISSUE } = require('./constants');
+    expect(github.rest.issues.createComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: BOT_MESSAGE_KEYWORD_GOOD_FIRST_ISSUE,
+      }),
+    );
+  });
+
+  test('keyword on non-GFI help-wanted issue does NOT send keyword GFI message', async () => {
+    const core = mockCore();
+    const context = makeContext({
+      commentBody: 'Can I work on this issue?',
+      commentAuthor: 'newcontrib',
+      issueCreator: 'creator',
+    });
+    const github = makeGithub({
+      labels: ['help wanted'], // NOT good first issue
+    });
+
+    await script({ github, context, core });
+
+    const { BOT_MESSAGE_KEYWORD_GOOD_FIRST_ISSUE } = require('./constants');
+    // Should NOT send the GFI keyword message
+    if (github.rest.issues.createComment.mock.calls.length > 0) {
+      expect(github.rest.issues.createComment).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: BOT_MESSAGE_KEYWORD_GOOD_FIRST_ISSUE,
+        }),
+      );
+    }
+  });
+});

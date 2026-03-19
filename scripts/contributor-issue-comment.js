@@ -12,6 +12,7 @@ const {
   BOT_MESSAGE_ALREADY_ASSIGNED,
   BOT_MESSAGE_ASSIGN_SUCCESS,
   BOT_MESSAGE_ASSIGN_NOT_GOOD_FIRST_ISSUE,
+  BOT_MESSAGE_KEYWORD_GOOD_FIRST_ISSUE,
   COMMUNITY_REPOS,
 } = require('./constants');
 const {
@@ -224,6 +225,7 @@ function shouldSendBotReply(
   isHelpWanted,
   isAssignmentRequest,
   isIssueAssignedToSomeoneElse,
+  isGoodFirstIssue,
 ) {
   if (commentAuthorIsCloseContributor) {
     return [false, null];
@@ -239,6 +241,11 @@ function shouldSendBotReply(
 
   if (!isHelpWanted && isAssignmentRequest) {
     return [true, BOT_MESSAGE_ISSUE_NOT_OPEN];
+  }
+
+  // Keyword on unassigned GFI → guide to /assign
+  if (isHelpWanted && isGoodFirstIssue && !isIssueAssignedToSomeoneElse && isAssignmentRequest) {
+    return [true, BOT_MESSAGE_KEYWORD_GOOD_FIRST_ISSUE];
   }
 
   return [false, null];
@@ -336,6 +343,7 @@ module.exports = async ({ github, context, core }) => {
       isHelpWanted,
       isAssignmentRequest,
       isIssueAssignedToSomeoneElse,
+      isGoodFirstIssue,
     );
     if (shouldPostBot) {
       // post bot reply only when there are no same bot comments
