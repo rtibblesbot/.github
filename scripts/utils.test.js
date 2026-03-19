@@ -1,13 +1,5 @@
 const { deleteBotComments, getRecentUnassignments } = require('./utils');
-
-// Helper to create mock core
-function mockCore() {
-  return {
-    info: jest.fn(),
-    warning: jest.fn(),
-    setFailed: jest.fn(),
-  };
-}
+const { mockCore } = require('./test-helpers');
 
 // Helper to create mock context
 function mockContext(owner = 'testorg', repo = 'testrepo') {

@@ -20,7 +20,7 @@ const {
   sendBotMessage,
   escapeIssueTitleForSlackMessage,
   hasRecentBotComment,
-  hasLabel,
+  getLabels,
   getIssues,
   getPullRequests,
   getRecentUnassignments,
@@ -78,6 +78,18 @@ function formatAssignAtLimitMessage(assignedIssues, recentUnassignments) {
   return message;
 }
 
+// Send a bot reply and set the Slack notification output in one step.
+async function sendAssignReplyAndNotify(issueNumber, message, slackSuffix, ctx) {
+  const { repo, issueUrl, issueTitle, github, context, core } = ctx;
+  const url = await sendBotMessage(issueNumber, message, { github, context, core });
+  if (url) {
+    core.setOutput(
+      'support_dev_notifications_bot',
+      `*[${repo}] <${url}|${slackSuffix}> on issue: <${issueUrl}|${issueTitle}>*`,
+    );
+  }
+}
+
 async function handleAssignCommand({
   issueNumber,
   issueUrl,
@@ -93,27 +105,22 @@ async function handleAssignCommand({
   context,
   core,
 }) {
+  const ctx = { repo, issueUrl, issueTitle, github, context, core };
+  const slackRequest =
+    `*[${repo}] ` +
+    `<${issueUrl}#issuecomment-${commentId}|/assign comment> ` +
+    `on issue: <${issueUrl}|${issueTitle}> ` +
+    `by _${commentAuthor}_*`;
+
   // Not help wanted
   if (!isHelpWanted) {
-    core.setOutput(
-      'support_dev_notifications_message',
-      `*[${repo}] ` +
-        `<${issueUrl}#issuecomment-${commentId}|/assign comment> ` +
-        `on issue: <${issueUrl}|${issueTitle}> ` +
-        `by _${commentAuthor}_*`,
+    core.setOutput('support_dev_notifications_message', slackRequest);
+    await sendAssignReplyAndNotify(
+      issueNumber,
+      BOT_MESSAGE_ISSUE_NOT_OPEN,
+      '/assign rejected - not open',
+      ctx,
     );
-    const url = await sendBotMessage(issueNumber, BOT_MESSAGE_ISSUE_NOT_OPEN, {
-      github,
-      context,
-      core,
-    });
-    if (url) {
-      core.setOutput(
-        'support_dev_notifications_bot',
-        `*[${repo}] <${url}|/assign rejected> on issue: ` +
-          `<${issueUrl}|${issueTitle}> - not open*`,
-      );
-    }
     return;
   }
 
@@ -124,43 +131,26 @@ async function handleAssignCommand({
   }
 
   // Slack notification: /assign requested (after no-op checks)
-  const slackRequest =
-    `*[${repo}] ` +
-    `<${issueUrl}#issuecomment-${commentId}|/assign comment> ` +
-    `on issue: <${issueUrl}|${issueTitle}> ` +
-    `by _${commentAuthor}_*`;
   core.setOutput('support_dev_notifications_message', slackRequest);
 
   // Assigned to someone else
   if (issueAssignees.length > 0) {
-    const url = await sendBotMessage(issueNumber, BOT_MESSAGE_ALREADY_ASSIGNED, {
-      github,
-      context,
-      core,
-    });
-    if (url) {
-      core.setOutput(
-        'support_dev_notifications_bot',
-        `*[${repo}] <${url}|/assign rejected> on issue: ` +
-          `<${issueUrl}|${issueTitle}> - already assigned*`,
-      );
-    }
+    await sendAssignReplyAndNotify(
+      issueNumber,
+      BOT_MESSAGE_ALREADY_ASSIGNED,
+      '/assign rejected - already assigned',
+      ctx,
+    );
     return;
   }
 
   if (!isGoodFirstIssue) {
-    const url = await sendBotMessage(issueNumber, BOT_MESSAGE_ASSIGN_NOT_GOOD_FIRST_ISSUE, {
-      github,
-      context,
-      core,
-    });
-    if (url) {
-      core.setOutput(
-        'support_dev_notifications_bot',
-        `*[${repo}] <${url}|/assign rejected> on issue: ` +
-          `<${issueUrl}|${issueTitle}> - not good first issue*`,
-      );
-    }
+    await sendAssignReplyAndNotify(
+      issueNumber,
+      BOT_MESSAGE_ASSIGN_NOT_GOOD_FIRST_ISSUE,
+      '/assign rejected - not good first issue',
+      ctx,
+    );
     return;
   }
 
@@ -180,18 +170,7 @@ async function handleAssignCommand({
 
   if (totalSlots >= MAX_ASSIGNED_ISSUES) {
     const message = formatAssignAtLimitMessage(assignedIssues, filteredUnassignments);
-    const url = await sendBotMessage(issueNumber, message, {
-      github,
-      context,
-      core,
-    });
-    if (url) {
-      core.setOutput(
-        'support_dev_notifications_bot',
-        `*[${repo}] <${url}|/assign rejected> on issue: ` +
-          `<${issueUrl}|${issueTitle}> - at limit*`,
-      );
-    }
+    await sendAssignReplyAndNotify(issueNumber, message, '/assign rejected - at limit', ctx);
     return;
   }
 
@@ -203,19 +182,12 @@ async function handleAssignCommand({
     assignees: [commentAuthor],
   });
 
-  const url = await sendBotMessage(issueNumber, BOT_MESSAGE_ASSIGN_SUCCESS, {
-    github,
-    context,
-    core,
-  });
-  if (url) {
-    core.setOutput(
-      'support_dev_notifications_bot',
-      `*[${repo}] <${url}|/assign approved> on issue: ` +
-        `<${issueUrl}|${issueTitle}> ` +
-        `- assigned _${commentAuthor}_*`,
-    );
-  }
+  await sendAssignReplyAndNotify(
+    issueNumber,
+    BOT_MESSAGE_ASSIGN_SUCCESS,
+    `/assign approved - assigned _${commentAuthor}_`,
+    ctx,
+  );
 }
 
 function shouldSendBotReply(
@@ -289,28 +261,12 @@ module.exports = async ({ github, context, core }) => {
     const isAssignmentRequest = keywordRegexes.find(regex => regex.test(commentBody));
     const isIssueAssignedToSomeoneElse =
       issueAssignees && issueAssignees.length > 0 && !issueAssignees.includes(commentAuthor);
-    const isHelpWanted = await hasLabel(
-      ISSUE_LABEL_HELP_WANTED,
-      owner,
-      repo,
-      issueNumber,
-      github,
-      core,
-    );
-    const commentAuthorIsCloseContributor = await isCloseContributor(commentAuthor, {
-      github,
-      context,
-      core,
-    });
-
-    const isGoodFirstIssue = await hasLabel(
-      ISSUE_LABEL_GOOD_FIRST_ISSUE,
-      owner,
-      repo,
-      issueNumber,
-      github,
-      core,
-    );
+    const [labels, commentAuthorIsCloseContributor] = await Promise.all([
+      getLabels(owner, repo, issueNumber, github, core),
+      isCloseContributor(commentAuthor, { github, context, core }),
+    ]);
+    const isHelpWanted = labels.includes(ISSUE_LABEL_HELP_WANTED.toLowerCase());
+    const isGoodFirstIssue = labels.includes(ISSUE_LABEL_GOOD_FIRST_ISSUE.toLowerCase());
 
     // Handle /assign command — early return skips normal flow.
     // This intentionally bypasses shouldContactSupport so

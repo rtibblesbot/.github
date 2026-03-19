@@ -3,15 +3,7 @@ const {
   ASSIGN_GUIDANCE_MARKER,
   BOT_MESSAGE_GOOD_FIRST_ISSUE_GUIDANCE,
 } = require('./constants');
-
-// Helper factories
-function mockCore() {
-  return {
-    info: jest.fn(),
-    warning: jest.fn(),
-    setFailed: jest.fn(),
-  };
-}
+const { mockCore } = require('./test-helpers');
 
 function mockContext(issueNumber = 42) {
   return {
@@ -19,8 +11,6 @@ function mockContext(issueNumber = 42) {
     payload: { issue: { number: issueNumber } },
   };
 }
-
-let github;
 
 describe('good-first-issue-comment', () => {
   let script;
@@ -35,7 +25,7 @@ describe('good-first-issue-comment', () => {
     const context = mockContext();
     const labels = [{ name: 'help wanted' }, { name: 'good first issue' }];
 
-    github = {
+    const github = {
       paginate: jest.fn().mockImplementation(method => {
         if (method === github.rest.issues.listLabelsOnIssue) {
           return Promise.resolve(labels);
@@ -73,7 +63,7 @@ describe('good-first-issue-comment', () => {
     const context = mockContext();
     const labels = [{ name: 'good first issue' }];
 
-    github = {
+    const github = {
       paginate: jest.fn().mockImplementation(method => {
         if (method === github.rest.issues.listLabelsOnIssue) {
           return Promise.resolve(labels);
@@ -113,7 +103,7 @@ describe('good-first-issue-comment', () => {
       },
     ];
 
-    github = {
+    const github = {
       paginate: jest.fn().mockImplementation(method => {
         if (method === github.rest.issues.listLabelsOnIssue) {
           return Promise.resolve(labels);
@@ -154,7 +144,7 @@ describe('good-first-issue-comment', () => {
       payload: {},
     };
 
-    github = {
+    const github = {
       paginate: jest.fn(),
       rest: {
         issues: {

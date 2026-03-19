@@ -171,22 +171,28 @@ async function hasRecentBotComment(
 }
 
 /**
- * Checks if an issue has a label with the given name (case-insensitive).
+ * Fetches all label names for an issue. Returns an array of lowercase label strings.
  */
-async function hasLabel(name, owner, repo, issueNumber, github, core) {
-  let labels = [];
+async function getLabels(owner, repo, issueNumber, github, core) {
   try {
     const allLabels = await github.paginate(github.rest.issues.listLabelsOnIssue, {
       owner,
       repo,
       issue_number: issueNumber,
     });
-    labels = allLabels.map(label => label.name);
+    return allLabels.map(label => label.name.toLowerCase());
   } catch (error) {
     core.warning(`Failed to fetch labels on issue #${issueNumber}: ${error.message}`);
-    labels = [];
+    return [];
   }
-  return labels.some(label => label.toLowerCase() === name.toLowerCase());
+}
+
+/**
+ * Checks if an issue has a label with the given name (case-insensitive).
+ */
+async function hasLabel(name, owner, repo, issueNumber, github, core) {
+  const labels = await getLabels(owner, repo, issueNumber, github, core);
+  return labels.includes(name.toLowerCase());
 }
 
 /**
@@ -271,9 +277,9 @@ async function deleteBotComments(issueNumber, botUsername, marker, { github, con
 async function getRecentUnassignments(username, daysAgo, owner, repos, github, core) {
   const cutoff = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
   const since = cutoff.toISOString().split('T')[0];
-  const unassignments = [];
 
-  for (const repo of repos) {
+  const promises = repos.map(async repo => {
+    const repoUnassignments = [];
     try {
       const q = `involves:${username} repo:${owner}/${repo} ` + `is:issue updated:>=${since}`;
       const { data } = await github.rest.search.issuesAndPullRequests({ q });
@@ -293,7 +299,7 @@ async function getRecentUnassignments(username, daysAgo, owner, repos, github, c
               event.assignee?.login?.toLowerCase() === username.toLowerCase() &&
               new Date(event.created_at) >= cutoff
             ) {
-              unassignments.push({
+              repoUnassignments.push({
                 repo,
                 issueNumber: issue.number,
                 issueUrl: issue.html_url,
@@ -311,7 +317,11 @@ async function getRecentUnassignments(username, daysAgo, owner, repos, github, c
     } catch (error) {
       core.warning(`Failed to search issues in ${repo}: ${error.message}`);
     }
-  }
+    return repoUnassignments;
+  });
+
+  const results = await Promise.all(promises);
+  const unassignments = results.flat();
 
   // Deduplicate by issueUrl, keeping the most recent unassignment event.
   // A user could be assigned/unassigned multiple times on the same issue
@@ -333,6 +343,7 @@ module.exports = {
   sendBotMessage,
   escapeIssueTitleForSlackMessage,
   hasRecentBotComment,
+  getLabels,
   hasLabel,
   getIssues,
   getPullRequests,

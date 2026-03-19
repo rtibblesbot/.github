@@ -5,20 +5,7 @@ const {
   BOT_MESSAGE_ASSIGN_NOT_GOOD_FIRST_ISSUE,
   MAX_ASSIGNED_ISSUES,
 } = require('./constants');
-
-// Helper factories
-function mockCore() {
-  const outputs = {};
-  return {
-    info: jest.fn(),
-    warning: jest.fn(),
-    setFailed: jest.fn(),
-    setOutput: jest.fn((key, val) => {
-      outputs[key] = val;
-    }),
-    _outputs: outputs,
-  };
-}
+const { mockCore } = require('./test-helpers');
 
 function makeContext({
   issueNumber = 42,
