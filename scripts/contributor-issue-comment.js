@@ -4,8 +4,14 @@ const {
   LE_BOT_USERNAME,
   KEYWORDS_DETECT_ASSIGNMENT_REQUEST,
   ISSUE_LABEL_HELP_WANTED,
+  ISSUE_LABEL_GOOD_FIRST_ISSUE,
+  MAX_ASSIGNED_ISSUES,
+  COOLDOWN_DAYS,
+  GSOC_NOTE,
   BOT_MESSAGE_ISSUE_NOT_OPEN,
   BOT_MESSAGE_ALREADY_ASSIGNED,
+  BOT_MESSAGE_ASSIGN_SUCCESS,
+  BOT_MESSAGE_ASSIGN_NOT_GOOD_FIRST_ISSUE,
   COMMUNITY_REPOS,
 } = require('./constants');
 const {
@@ -16,6 +22,7 @@ const {
   hasLabel,
   getIssues,
   getPullRequests,
+  getRecentUnassignments,
 } = require('./utils');
 
 // Format information about author's assigned open issues
@@ -38,6 +45,176 @@ function formatAuthorActivity(issues, pullRequests) {
   }
 
   return `(${parts.join(' | ')})`;
+}
+
+function formatAssignAtLimitMessage(assignedIssues, recentUnassignments) {
+  let message =
+    `Hi! 👋\n\n` +
+    `You can't be assigned to this issue right now because ` +
+    `you've reached the **${MAX_ASSIGNED_ISSUES}-issue limit**.`;
+
+  if (assignedIssues.length > 0) {
+    message += '\n\n**Your current assignments:**\n';
+    message += assignedIssues.map(i => `- ${i.html_url}`).join('\n');
+  }
+
+  if (recentUnassignments.length > 0) {
+    message += '\n\n**Recently dropped issues (cooldown):**\n';
+    message += recentUnassignments
+      .map(u => {
+        const msRemaining =
+          COOLDOWN_DAYS * 24 * 60 * 60 * 1000 - (Date.now() - new Date(u.unassignedAt).getTime());
+        const daysRemaining = Math.ceil(msRemaining / (24 * 60 * 60 * 1000));
+        return (
+          `- ${u.issueUrl} ` + `(${daysRemaining} day${daysRemaining !== 1 ? 's' : ''} remaining)`
+        );
+      })
+      .join('\n');
+  }
+
+  message +=
+    `\n\nOnce a slot opens up, come back and comment ` + `\`/assign\` again. 😊${GSOC_NOTE}`;
+  return message;
+}
+
+async function handleAssignCommand({
+  issueNumber,
+  issueUrl,
+  issueTitle,
+  commentAuthor,
+  commentId,
+  issueAssignees,
+  isHelpWanted,
+  isGoodFirstIssue,
+  repo,
+  owner,
+  github,
+  context,
+  core,
+}) {
+  // Not help wanted
+  if (!isHelpWanted) {
+    core.setOutput(
+      'support_dev_notifications_message',
+      `*[${repo}] ` +
+        `<${issueUrl}#issuecomment-${commentId}|/assign comment> ` +
+        `on issue: <${issueUrl}|${issueTitle}> ` +
+        `by _${commentAuthor}_*`,
+    );
+    const url = await sendBotMessage(issueNumber, BOT_MESSAGE_ISSUE_NOT_OPEN, {
+      github,
+      context,
+      core,
+    });
+    if (url) {
+      core.setOutput(
+        'support_dev_notifications_bot',
+        `*[${repo}] <${url}|/assign rejected> on issue: ` +
+          `<${issueUrl}|${issueTitle}> - not open*`,
+      );
+    }
+    return;
+  }
+
+  // Already assigned to commenter — silent no-op, no Slack
+  if (issueAssignees.includes(commentAuthor)) {
+    core.info(`${commentAuthor} already assigned to #${issueNumber}`);
+    return;
+  }
+
+  // Slack notification: /assign requested (after no-op checks)
+  const slackRequest =
+    `*[${repo}] ` +
+    `<${issueUrl}#issuecomment-${commentId}|/assign comment> ` +
+    `on issue: <${issueUrl}|${issueTitle}> ` +
+    `by _${commentAuthor}_*`;
+  core.setOutput('support_dev_notifications_message', slackRequest);
+
+  // Assigned to someone else
+  if (issueAssignees.length > 0) {
+    const url = await sendBotMessage(issueNumber, BOT_MESSAGE_ALREADY_ASSIGNED, {
+      github,
+      context,
+      core,
+    });
+    if (url) {
+      core.setOutput(
+        'support_dev_notifications_bot',
+        `*[${repo}] <${url}|/assign rejected> on issue: ` +
+          `<${issueUrl}|${issueTitle}> - already assigned*`,
+      );
+    }
+    return;
+  }
+
+  if (!isGoodFirstIssue) {
+    const url = await sendBotMessage(issueNumber, BOT_MESSAGE_ASSIGN_NOT_GOOD_FIRST_ISSUE, {
+      github,
+      context,
+      core,
+    });
+    if (url) {
+      core.setOutput(
+        'support_dev_notifications_bot',
+        `*[${repo}] <${url}|/assign rejected> on issue: ` +
+          `<${issueUrl}|${issueTitle}> - not good first issue*`,
+      );
+    }
+    return;
+  }
+
+  // --- Limit check and assignment ---
+
+  // Check cross-repo limits and cooldown
+  const [assignedIssues, recentUnassignments] = await Promise.all([
+    getIssues(commentAuthor, 'open', owner, COMMUNITY_REPOS, github, core),
+    getRecentUnassignments(commentAuthor, COOLDOWN_DAYS, owner, COMMUNITY_REPOS, github, core),
+  ]);
+
+  // Filter unassignments to exclude currently assigned issues
+  const assignedUrls = new Set(assignedIssues.map(i => i.html_url));
+  const filteredUnassignments = recentUnassignments.filter(u => !assignedUrls.has(u.issueUrl));
+
+  const totalSlots = assignedIssues.length + filteredUnassignments.length;
+
+  if (totalSlots >= MAX_ASSIGNED_ISSUES) {
+    const message = formatAssignAtLimitMessage(assignedIssues, filteredUnassignments);
+    const url = await sendBotMessage(issueNumber, message, {
+      github,
+      context,
+      core,
+    });
+    if (url) {
+      core.setOutput(
+        'support_dev_notifications_bot',
+        `*[${repo}] <${url}|/assign rejected> on issue: ` +
+          `<${issueUrl}|${issueTitle}> - at limit*`,
+      );
+    }
+    return;
+  }
+
+  // Assign the contributor
+  await github.rest.issues.addAssignees({
+    owner,
+    repo,
+    issue_number: issueNumber,
+    assignees: [commentAuthor],
+  });
+
+  const url = await sendBotMessage(issueNumber, BOT_MESSAGE_ASSIGN_SUCCESS, {
+    github,
+    context,
+    core,
+  });
+  if (url) {
+    core.setOutput(
+      'support_dev_notifications_bot',
+      `*[${repo}] <${url}|/assign approved> on issue: ` +
+        `<${issueUrl}|${issueTitle}> ` +
+        `- assigned _${commentAuthor}_*`,
+    );
+  }
 }
 
 function shouldSendBotReply(
@@ -118,6 +295,39 @@ module.exports = async ({ github, context, core }) => {
       context,
       core,
     });
+
+    const isGoodFirstIssue = await hasLabel(
+      ISSUE_LABEL_GOOD_FIRST_ISSUE,
+      owner,
+      repo,
+      issueNumber,
+      github,
+      core,
+    );
+
+    // Handle /assign command — early return skips normal flow.
+    // This intentionally bypasses shouldContactSupport so
+    // /assign activity never reaches #support-dev (only
+    // #support-dev-notifications). See docs/community-automations.md.
+    const isAssignCommand = commentBody.trim().toLowerCase() === '/assign';
+    if (isAssignCommand) {
+      await handleAssignCommand({
+        issueNumber,
+        issueUrl,
+        issueTitle,
+        commentAuthor,
+        commentId,
+        issueAssignees,
+        isHelpWanted,
+        isGoodFirstIssue,
+        repo,
+        owner,
+        github,
+        context,
+        core,
+      });
+      return;
+    }
 
     const [shouldPostBot, botMessage] = shouldSendBotReply(
       issueCreator,
