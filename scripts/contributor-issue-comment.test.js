@@ -213,6 +213,50 @@ describe('/assign command handling', () => {
     );
   });
 
+  test('/assign at limit via cooldown declines (1 assigned + 1 cooldown)', async () => {
+    const core = mockCore();
+    const context = makeContext({ commentBody: '/assign' });
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    const github = makeGithub({
+      labels: ['help wanted', 'good first issue'],
+      assignedIssues: [
+        {
+          html_url: 'https://github.com/org/repo1/issues/1',
+          number: 1,
+        },
+      ],
+      searchItems: [
+        {
+          number: 5,
+          html_url: 'https://github.com/org/repo2/issues/5',
+          title: 'Dropped issue',
+        },
+      ],
+      unassignmentEvents: [
+        {
+          event: 'unassigned',
+          assignee: { login: 'contributor1' },
+          created_at: twoDaysAgo,
+        },
+      ],
+    });
+
+    await script({ github, context, core });
+
+    expect(github.rest.issues.addAssignees).not.toHaveBeenCalled();
+    expect(github.rest.issues.createComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining(`${MAX_ASSIGNED_ISSUES}-issue limit`),
+      }),
+    );
+    // Should mention cooldown
+    expect(github.rest.issues.createComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining('cooldown'),
+      }),
+    );
+  });
+
   test('/assign is case-insensitive and trims whitespace', async () => {
     const core = mockCore();
     const context = makeContext({ commentBody: '  /Assign  ' });
