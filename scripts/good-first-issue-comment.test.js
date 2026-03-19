@@ -20,35 +20,6 @@ function mockContext(issueNumber = 42) {
   };
 }
 
-function mockGithub({ hasHelpWanted = true, existingComments = [] } = {}) {
-  const labels = hasHelpWanted
-    ? [{ name: 'help wanted' }, { name: 'good first issue' }]
-    : [{ name: 'good first issue' }];
-
-  return {
-    paginate: jest.fn().mockImplementation(method => {
-      if (method === github.rest.issues.listLabelsOnIssue) {
-        return Promise.resolve(labels);
-      }
-      if (method === github.rest.issues.listComments) {
-        return Promise.resolve(existingComments);
-      }
-      return Promise.resolve([]);
-    }),
-    rest: {
-      issues: {
-        listLabelsOnIssue: jest.fn(),
-        listComments: jest.fn(),
-        createComment: jest.fn().mockResolvedValue({
-          data: { html_url: 'https://github.com/testorg/testrepo/issues/42#comment-1' },
-        }),
-        deleteComment: jest.fn().mockResolvedValue({}),
-      },
-    },
-  };
-}
-
-// Need to capture the variable before mockGithub uses it in closure
 let github;
 
 describe('good-first-issue-comment', () => {

@@ -28,7 +28,6 @@ function makeContext({
   issueCreator = 'creator',
   repo = 'testrepo',
   owner = 'testorg',
-  labels = [],
 } = {}) {
   return {
     repo: { owner, repo },
@@ -56,7 +55,7 @@ function makeGithub({
   searchItems = [],
 } = {}) {
   const github = {
-    paginate: jest.fn().mockImplementation((method, opts) => {
+    paginate: jest.fn().mockImplementation(method => {
       if (method === github.rest.issues.listLabelsOnIssue) {
         return Promise.resolve(labels.map(n => ({ name: n })));
       }
