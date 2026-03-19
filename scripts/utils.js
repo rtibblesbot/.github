@@ -234,6 +234,88 @@ async function getPullRequests(author, state, owner, repos, github, core) {
   return results.flat();
 }
 
+/**
+ * Deletes bot comments on an issue that contain a specific marker string.
+ */
+async function deleteBotComments(issueNumber, botUsername, marker, { github, context, core }) {
+  const owner = context.repo.owner;
+  const repo = context.repo.repo;
+
+  try {
+    const comments = await github.paginate(github.rest.issues.listComments, {
+      owner,
+      repo,
+      issue_number: issueNumber,
+    });
+
+    for (const comment of comments) {
+      if (comment.user?.login === botUsername && comment.body?.includes(marker)) {
+        await github.rest.issues.deleteComment({
+          owner,
+          repo,
+          comment_id: comment.id,
+        });
+        core.info(`Deleted bot comment ${comment.id} on issue #${issueNumber}`);
+      }
+    }
+  } catch (error) {
+    core.warning(`Failed to delete bot comments on #${issueNumber}: ` + error.message);
+  }
+}
+
+/**
+ * Finds recent unassignment events for a user across repos.
+ * Uses the search API to find candidate issues, then checks
+ * timeline events for unassigned events within the cutoff.
+ */
+async function getRecentUnassignments(username, daysAgo, owner, repos, github, core) {
+  const cutoff = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
+  const since = cutoff.toISOString().split('T')[0];
+  const unassignments = [];
+
+  for (const repo of repos) {
+    try {
+      const q = `involves:${username} repo:${owner}/${repo} ` + `is:issue updated:>=${since}`;
+      const { data } = await github.rest.search.issuesAndPullRequests({ q });
+
+      for (const issue of data.items || []) {
+        try {
+          const events = await github.paginate(github.rest.issues.listEventsForTimeline, {
+            owner,
+            repo,
+            issue_number: issue.number,
+            per_page: 100,
+          });
+
+          for (const event of events) {
+            if (
+              event.event === 'unassigned' &&
+              event.assignee?.login?.toLowerCase() === username.toLowerCase() &&
+              new Date(event.created_at) >= cutoff
+            ) {
+              unassignments.push({
+                repo,
+                issueNumber: issue.number,
+                issueUrl: issue.html_url,
+                issueTitle: issue.title,
+                unassignedAt: event.created_at,
+              });
+            }
+          }
+        } catch (tlError) {
+          core.warning(
+            `Failed to fetch timeline for ` + `${repo}#${issue.number}: ${tlError.message}`,
+          );
+        }
+      }
+    } catch (error) {
+      core.warning(`Failed to search issues in ${repo}: ${error.message}`);
+    }
+  }
+
+  return unassignments;
+}
+
 module.exports = {
   isContributor,
   isCloseContributor,
@@ -244,4 +326,6 @@ module.exports = {
   hasLabel,
   getIssues,
   getPullRequests,
+  deleteBotComments,
+  getRecentUnassignments,
 };
