@@ -198,6 +198,7 @@ function shouldSendBotReply(
   isAssignmentRequest,
   isIssueAssignedToSomeoneElse,
   isGoodFirstIssue,
+  isUnassigned,
 ) {
   if (commentAuthorIsCloseContributor) {
     return [false, null];
@@ -216,7 +217,7 @@ function shouldSendBotReply(
   }
 
   // Keyword on unassigned GFI → guide to /assign
-  if (isHelpWanted && isGoodFirstIssue && !isIssueAssignedToSomeoneElse && isAssignmentRequest) {
+  if (isHelpWanted && isGoodFirstIssue && isUnassigned && isAssignmentRequest) {
     return [true, BOT_MESSAGE_KEYWORD_GOOD_FIRST_ISSUE];
   }
 
@@ -292,6 +293,7 @@ module.exports = async ({ github, context, core }) => {
       return;
     }
 
+    const isUnassigned = issueAssignees.length === 0;
     const [shouldPostBot, botMessage] = shouldSendBotReply(
       issueCreator,
       commentAuthor,
@@ -300,6 +302,7 @@ module.exports = async ({ github, context, core }) => {
       isAssignmentRequest,
       isIssueAssignedToSomeoneElse,
       isGoodFirstIssue,
+      isUnassigned,
     );
     if (shouldPostBot) {
       // post bot reply only when there are no same bot comments

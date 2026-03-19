@@ -306,4 +306,27 @@ describe('keyword detection on GFI issues', () => {
       );
     }
   });
+
+  test('keyword on GFI when commenter is already assigned does NOT send keyword GFI message', async () => {
+    const core = mockCore();
+    const context = makeContext({
+      commentBody: 'I am working on this issue',
+      commentAuthor: 'newcontrib',
+      issueCreator: 'creator',
+      issueAssignees: ['newcontrib'],
+    });
+    const github = makeGithub({
+      labels: ['help wanted', 'good first issue'],
+    });
+
+    await script({ github, context, core });
+
+    const { BOT_MESSAGE_KEYWORD_GOOD_FIRST_ISSUE } = require('./constants');
+    // Should NOT tell an already-assigned contributor to use /assign
+    expect(github.rest.issues.createComment).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: BOT_MESSAGE_KEYWORD_GOOD_FIRST_ISSUE,
+      }),
+    );
+  });
 });
