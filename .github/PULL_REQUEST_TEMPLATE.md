@@ -8,10 +8,9 @@
 
 ## Summary
 <!--
- * description of the change
- * manual verification steps performed
- * screenshots if the PR affects the layout of the UI
- * screen recording(s) if the PR implements or updates a UI workflow
+ * headline description of the change
+ * motivation for the change
+ * reasoning for the approach taken
 -->
 
 …
@@ -25,8 +24,11 @@
 
 ## Reviewer guidance
 <!--
- * how can a reviewer test these changes?
- * are there any risky areas that deserve extra testing
+ * manual verification steps you have performed
+ * anything additional a reviewer can do to test these changes?
+ * screenshots if the PR affects the layout of the UI
+ * screen recording(s) if the PR implements or updates a UI workflow
+ * open questions or uncertainties about approach
 -->
 
 …
