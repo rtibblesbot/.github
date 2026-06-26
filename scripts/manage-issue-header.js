@@ -2,6 +2,9 @@
  * Updates issue contributing header according to the presence of the 'help wanted' label.
  */
 
+const { LE_BOT_USERNAME, ASSIGN_GUIDANCE_MARKER } = require('./constants');
+const { deleteBotComments } = require('./utils');
+
 const HELP_WANTED_LABEL = 'help wanted';
 
 const HEADER_START_MARKER = '<!---HEADER START-->';
@@ -62,6 +65,15 @@ module.exports = async ({ github, context, core }) => {
       case 'unlabeled':
         if (labelName === HELP_WANTED_LABEL) {
           header = NON_HELP_WANTED_HEADER;
+          await deleteBotComments(
+            issueNumber,
+            LE_BOT_USERNAME,
+            ASSIGN_GUIDANCE_MARKER,
+            repoOwner,
+            repoName,
+            github,
+            core,
+          );
         }
         break;
       default:
